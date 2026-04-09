@@ -23,4 +23,25 @@ test.describe('Login flow', () => {
     await expect(page).toHaveURL(/secure/);
   });
 
+  test('User cannot login with invalid credentials', async ({ page }) => {
+
+    // открыть страницу логина
+    await page.goto('https://the-internet.herokuapp.com/login');
+
+    // ввести некорректный логин
+    await page.locator('#username').fill('wrong-user');
+
+    // ввести некорректный пароль
+    await page.locator('#password').fill('wrong-password');
+
+    // нажать кнопку login
+    await page.locator('button[type="submit"]').click();
+
+    // проверка: появился текст об ошибке
+    await expect(page.locator('#flash')).toContainText('Your username is invalid!');
+
+    // проверка: пользователь остался на странице логина
+    await expect(page).toHaveURL(/login/);
+  });
+
 });
