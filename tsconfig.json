@@ -1,0 +1,37 @@
+// 2) tsconfig.json
+// Это минимальный и нормальный конфиг для TypeScript + Playwright.
+// Он нужен, чтобы .ts-файлы корректно понимались редактором и тест-раннером.
+
+{
+  "compilerOptions": {
+    // Современный target.
+    "target": "ES2022",
+
+    // Модульная система.
+    // Для Playwright такой вариант обычно подходит без проблем.
+    "module": "commonjs",
+
+    // Разрешение модулей в стиле Node.js.
+    "moduleResolution": "node",
+
+    // Включаем строгую проверку типов.
+    // Это полезно, чтобы не тащить слаботипизированный код.
+    "strict": true,
+
+    // Подключаем типы Node.js и Playwright.
+    // Нужны, например, для Buffer и test/expect.
+    "types": ["node", "@playwright/test"],
+
+    // Упрощает импорт модулей.
+    "esModuleInterop": true,
+
+    // Ускоряет и упрощает проверку сторонних типов.
+    "skipLibCheck": true
+  },
+
+  // Какие файлы включать в TypeScript-проект.
+  "include": [
+    "tests/**/*.ts",
+    "playwright.config.ts"
+  ]
+}
