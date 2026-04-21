@@ -1,22 +1,21 @@
-// 2) tests/api/basic-auth.spec.ts
-// Ниже готовый suite с подробными комментариями.
-// Он проверяет именно HTTP Basic Auth на уровне API/protocol,
-// а не popup браузера и не UI-форму.
+// tests/api/basic-auth.spec.ts
+// Suite проверяет HTTP Basic Authentication на уровне протокола (API),
+// без участия UI, popup и browser-driven логики.
+// Проверяется контракт сервера: status codes, headers, auth flow и устойчивость к некорректным данным.
 
 import { test, expect } from '@playwright/test';
 
-// Отдельная константа для endpoint.
-// Так проще поддерживать тесты и переиспользовать путь.
+// Endpoint под тестированием.
+// Используется baseURL из playwright.config.ts
 const endpoint = '/basic_auth';
 
 /**
- * Утилита для сборки значения Authorization header для Basic Auth.
+ * Формирует значение Authorization header для Basic Auth.
  *
- * По стандарту Basic Auth credentials передаются так:
- *   username:password
- * потом строка кодируется в Base64,
- * и результат вставляется в header:
- *   Authorization: Basic <base64>
+ * RFC логика:
+ * 1. Берём строку: username:password
+ * 2. Кодируем в Base64
+ * 3. Добавляем префикс "Basic "
  *
  * Пример:
  *   admin:admin -> YWRtaW46YWRtaW4=
@@ -27,111 +26,169 @@ function toBasicAuth(username: string, password: string): string {
 }
 
 test.describe('Basic Auth - the-internet.herokuapp.com', () => {
-  test('should return 401 without Authorization header', async ({ request }) => {
-    // Делаем запрос к защищённому endpoint без credentials.
-    // Это имитирует самый первый заход пользователя на страницу.
-    const response = await request.get(endpoint);
 
-    // Ожидаем 401 Unauthorized.
-    // Это правильное поведение для ресурса, защищённого Basic Auth.
-    expect(response.status()).toBe(401);
-  });
+  // =========================
+  // 🔒 Authentication challenge
+  // =========================
+  test.describe('Authentication challenge (no credentials)', () => {
 
-  test('should return WWW-Authenticate header with Basic realm', async ({ request }) => {
-    // Снова делаем запрос без auth.
-    const response = await request.get(endpoint);
+    test('should return 401 without Authorization header', async ({ request }) => {
+      // Первый запрос без credentials
+      const response = await request.get(endpoint);
 
-    // Сервер должен ответить 401.
-    expect(response.status()).toBe(401);
-
-    // Извлекаем заголовки ответа.
-    // В Playwright response.headers() возвращает объект:
-    // { 'content-type': '...', 'www-authenticate': '...' }
-    const headers = response.headers();
-
-    // Проверяем, что сервер действительно прислал challenge header.
-    // Это обязательная часть Basic Auth handshake.
-    expect(headers['www-authenticate']).toBeTruthy();
-
-    // Проверяем точное значение.
-    // В данном demo-сайте realm ожидается "Restricted Area".
-    expect(headers['www-authenticate']).toBe('Basic realm="Restricted Area"');
-  });
-
-  test('should return 200 with valid basic auth credentials', async ({ request }) => {
-    // Делаем запрос уже с валидным Authorization header.
-    const response = await request.get(endpoint, {
-      headers: {
-        Authorization: toBasicAuth('admin', 'admin'),
-      },
+      // Сервер обязан вернуть 401
+      expect(response.status()).toBe(401);
     });
 
-    // При корректных credentials ожидаем успешный ответ.
-    expect(response.status()).toBe(200);
+    test('should include WWW-Authenticate header with Basic realm', async ({ request }) => {
+      const response = await request.get(endpoint);
 
-    // Для дополнительной уверенности можно проверить тело ответа.
-    const body = await response.text();
+      expect(response.status()).toBe(401);
 
-    // Сайт the-internet обычно возвращает HTML с текстом "Congratulations!"
-    expect(body).toContain('Congratulations!');
-  });
+      const headers = response.headers();
 
-  test('should return 401 with invalid password', async ({ request }) => {
-    // Корректный username, но неправильный password.
-    // Это негативный сценарий.
-    const response = await request.get(endpoint, {
-      headers: {
-        Authorization: toBasicAuth('admin', 'wrong-password'),
-      },
+      // Проверка наличия challenge header
+      expect(headers['www-authenticate']).toBeTruthy();
+
+      // Проверка конкретного значения realm
+      expect(headers['www-authenticate']).toBe('Basic realm="Restricted Area"');
     });
 
-    // Ожидаем 401.
-    expect(response.status()).toBe(401);
-
-    // Сервер должен снова прислать challenge header.
-    // Это говорит о том, что доступ не выдан и требуется корректная аутентификация.
-    expect(response.headers()['www-authenticate']).toBe('Basic realm="Restricted Area"');
   });
 
-  test('should return 401 with invalid username', async ({ request }) => {
-    // Неправильный username, правильный password.
-    const response = await request.get(endpoint, {
-      headers: {
-        Authorization: toBasicAuth('wrong-user', 'admin'),
-      },
+  // =========================
+  // ✅ Valid credentials
+  // =========================
+  test.describe('Valid credentials', () => {
+
+    test('should return 200 with valid basic auth credentials', async ({ request }) => {
+      const response = await request.get(endpoint, {
+        headers: {
+          Authorization: toBasicAuth('admin', 'admin'),
+        },
+      });
+
+      expect(response.status()).toBe(200);
+
+      const body = await response.text();
+
+      // Проверка бизнес-результата (не только статус-кода)
+      expect(body).toContain('Congratulations!');
     });
 
-    // Ожидаем отказ в доступе.
-    expect(response.status()).toBe(401);
   });
 
-  test('should return 401 with malformed Authorization scheme', async ({ request }) => {
-    // Проверяем случай, когда схема авторизации не Basic.
-    // Даже если credentials формально похожи, сервер не должен принять такой запрос.
-    const response = await request.get(endpoint, {
-      headers: {
-        Authorization: 'Bearer some-token',
-      },
+  // =========================
+  // ❌ Invalid credentials
+  // =========================
+  test.describe('Invalid credentials', () => {
+
+    test('should return 401 with invalid password', async ({ request }) => {
+      const response = await request.get(endpoint, {
+        headers: {
+          Authorization: toBasicAuth('admin', 'wrong-password'),
+        },
+      });
+
+      expect(response.status()).toBe(401);
+
+      // Сервер должен снова инициировать challenge
+      expect(response.headers()['www-authenticate'])
+        .toBe('Basic realm="Restricted Area"');
     });
 
-    expect(response.status()).toBe(401);
-  });
+    test('should return 401 with invalid username', async ({ request }) => {
+      const response = await request.get(endpoint, {
+        headers: {
+          Authorization: toBasicAuth('wrong-user', 'admin'),
+        },
+      });
 
-  test('should simulate challenge flow: first request 401, second request 200', async ({ request }) => {
-    // Это приближённая симуляция того,
-    // что делает браузер при Basic Auth.
-    //
-    // Шаг 1: первый запрос без auth -> 401
-    const firstResponse = await request.get(endpoint);
-    expect(firstResponse.status()).toBe(401);
-
-    // Шаг 2: повторный запрос с credentials -> 200
-    const secondResponse = await request.get(endpoint, {
-      headers: {
-        Authorization: toBasicAuth('admin', 'admin'),
-      },
+      expect(response.status()).toBe(401);
     });
 
-    expect(secondResponse.status()).toBe(200);
+    test('should return 401 with both username and password invalid', async ({ request }) => {
+      const response = await request.get(endpoint, {
+        headers: {
+          Authorization: toBasicAuth('wrong-user', 'wrong-password'),
+        },
+      });
+
+      expect(response.status()).toBe(401);
+    });
+
   });
+
+  // =========================
+  // ⚙️ Protocol edge cases
+  // =========================
+  test.describe('Protocol edge cases', () => {
+
+    test('should return 401 when Authorization scheme is not Basic', async ({ request }) => {
+      const response = await request.get(endpoint, {
+        headers: {
+          Authorization: 'Bearer some-token',
+        },
+      });
+
+      expect(response.status()).toBe(401);
+    });
+
+    test('should return 401 with malformed base64 credentials', async ({ request }) => {
+      const response = await request.get(endpoint, {
+        headers: {
+          // Некорректный base64
+          Authorization: 'Basic invalid_base64!!!',
+        },
+      });
+
+      expect(response.status()).toBe(401);
+    });
+
+    test('should return 401 with empty credentials', async ({ request }) => {
+      const response = await request.get(endpoint, {
+        headers: {
+          // ":" → пустой user и password
+          Authorization: `Basic ${Buffer.from(':').toString('base64')}`,
+        },
+      });
+
+      expect(response.status()).toBe(401);
+    });
+
+    test('should return 401 when Basic prefix is missing', async ({ request }) => {
+      const response = await request.get(endpoint, {
+        headers: {
+          // base64 есть, но нет "Basic "
+          Authorization: Buffer.from('admin:admin').toString('base64'),
+        },
+      });
+
+      expect(response.status()).toBe(401);
+    });
+
+  });
+
+  // =========================
+  // 🔁 Auth flow
+  // =========================
+  test.describe('Challenge-response flow', () => {
+
+    test('should follow challenge-response flow (401 → 200)', async ({ request }) => {
+      // Шаг 1: без credentials
+      const firstResponse = await request.get(endpoint);
+      expect(firstResponse.status()).toBe(401);
+
+      // Шаг 2: с credentials
+      const secondResponse = await request.get(endpoint, {
+        headers: {
+          Authorization: toBasicAuth('admin', 'admin'),
+        },
+      });
+
+      expect(secondResponse.status()).toBe(200);
+    });
+
+  });
+
 });
